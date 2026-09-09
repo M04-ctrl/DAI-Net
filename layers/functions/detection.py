@@ -35,6 +35,12 @@ class Detect(Function):
             prior_data: (tensor) Prior boxes and variances from priorbox layers
                 Shape: [1,num_priors,4] 
         """
+        # FIX: 强制三个输入张量同设备,避免外部传入 CPU tensor 导致 decode 报错
+        _dev = loc_data.device
+        if prior_data.device != _dev:
+            prior_data = prior_data.to(_dev)
+        if conf_data.device != _dev:
+            conf_data = conf_data.to(_dev)
         num = loc_data.size(0)
         num_priors = prior_data.size(0)
 
@@ -48,7 +54,7 @@ class Detect(Function):
                                batch_priors, self.variance)
         decoded_boxes = decoded_boxes.view(num, num_priors, 4)
 
-        output = torch.zeros(num, self.num_classes, self.top_k, 5)
+        output = torch.zeros(num, self.num_classes, self.top_k, 5, device=_dev)
 
         for i in range(num):
             boxes = decoded_boxes[i].clone()

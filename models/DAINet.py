@@ -240,10 +240,11 @@ class DSFD(nn.Module):
                                for o in conf_pal2], 1)
 
         priorbox = PriorBox(size, features_maps, cfg, pal=1)
-        self.priors_pal1 = Variable(priorbox.forward(), volatile=True)
+        _device = next(self.parameters()).device
+        self.priors_pal1 = priorbox.forward().to(_device)
 
         priorbox = PriorBox(size, features_maps, cfg, pal=2)
-        self.priors_pal2 = Variable(priorbox.forward(), volatile=True)
+        self.priors_pal2 = priorbox.forward().to(_device)
 
         if self.phase == 'test':
             output = self.detect.forward(
@@ -398,10 +399,11 @@ class DSFD(nn.Module):
                                for o in conf_pal2], 1)
 
         priorbox = PriorBox(size, features_maps, cfg, pal=1)
-        self.priors_pal1 = Variable(priorbox.forward(), volatile=True)
+        _device = next(self.parameters()).device
+        self.priors_pal1 = priorbox.forward().to(_device)
 
         priorbox = PriorBox(size, features_maps, cfg, pal=2)
-        self.priors_pal2 = Variable(priorbox.forward(), volatile=True)
+        self.priors_pal2 = priorbox.forward().to(_device)
 
         if self.phase == 'test':
             output = self.detect.forward(
