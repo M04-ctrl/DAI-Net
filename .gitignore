@@ -6,7 +6,6 @@ __pycache__/
 # 数据集与模型权重（体积大，无需提交到代码仓库）
 dataset/
 weights/
-data/
 
 # 运行输出结果
 result/
@@ -15,3 +14,6 @@ result/
 .idea/
 .vscode/
 *.log
+
+# Generated signal datasets
+/signal_dataset_v5/
