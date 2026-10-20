@@ -17,3 +17,19 @@ result/
 
 # Generated signal datasets
 /signal_dataset_v5/
+
+# Signal detection experiments
+/bbox_preview/
+/bbox_preview_debug/
+/gmsk_diagnosis/
+/modulation_diagnosis/
+/spectrogram_comparison/
+
+# Generated datasets
+/signal_dataset_v5/
+/signal_dataset_debug/
+
+# Local backup files
+/generate_v55_backup.py
+/generate_before_indent_fix.py
+/generate_bbox_labels_backup.py
