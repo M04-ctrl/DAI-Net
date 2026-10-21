@@ -33,3 +33,17 @@ result/
 /generate_v55_backup.py
 /generate_before_indent_fix.py
 /generate_bbox_labels_backup.py
+
+# FM / AM diagnostics
+/fm_diagnosis/
+/fm_diagnosis_fine/
+/am_dsb_diagnosis/
+/am_dsb_diagnosis_fine/
+/am_ssb_diagnosis/
+
+# OFDM diagnostics
+/ofdm_leakage_diagnosis/
+/ofdm_cp_diagnosis/
+/ofdm_wola_diagnosis/
+/ofdm_wola_stability/
+EOF

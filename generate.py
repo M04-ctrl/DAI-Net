@@ -686,8 +686,22 @@ class SignalGenerator:
 
         elif mod_type == 'FM':
 
+            # FM 单音调制：初步经验带宽映射
+            # 映射基于 bw=0.5 MHz 附近的局部扫描结果
+            # 其他带宽仍需通过正式生成器复测
+
             mod_f = 10e3
-            beta = 5.0
+
+            fm_slope = 21300.0
+            fm_intercept = 21600.0
+
+            beta = (
+                bw - fm_intercept
+            ) / fm_slope
+
+            # 当前仅避免出现负调制指数
+            # 不将此约束视为已验证的带宽范围
+            beta = max(float(beta), 0.0)
 
             mod_sig = np.sin(
                 2
@@ -705,11 +719,15 @@ class SignalGenerator:
 
         elif mod_type == 'AM_DSB':
 
-            mod_f = 5e3
+            # AM_DSB 带载波双边带调幅
+            # 临时经验映射：0.5 MHz目标带宽下验证
+            # 其他目标带宽仍需要独立验证
+
+            mod_f = 0.45 * bw
             m = 0.8
 
             mod_sig = (
-                1
+                1.0
                 + m
                 * np.sin(
                     2
@@ -724,28 +742,116 @@ class SignalGenerator:
 
         elif mod_type == 'AM_SSB':
 
-            mod_f = 5e3
-            m = 0.8
+            # SSB-SC：抑制载波单边带调幅（USB）
+            # 采用带限实值随机消息 + Hilbert 解析信号
+            # 最后将占用频带中心移动至基带零频
+            #
+            # bw：目标占用带宽，单位 Hz
+            # 本映射目前仅在 0.5 MHz 附近完成验证
 
-            mod_sig = np.sin(
-                2
-                * np.pi
-                * mod_f
-                * np.arange(N)
-                / self.fs
+            message_bw = float(bw)
+
+            low_freq = 50e3
+            transition = 10e3
+
+            # ----------------------------------------
+            # 1. 生成实值随机消息
+            # ----------------------------------------
+
+            noise = np.random.standard_normal(N)
+
+            freqs = np.fft.fftfreq(
+                N,
+                d=1.0 / self.fs
             )
 
-            base = (
-                1
-                + m * mod_sig
-            ) * np.exp(
-                1j
+            abs_f = np.abs(freqs)
+
+            high_freq = low_freq + message_bw
+
+            mask = np.zeros(N, dtype=float)
+
+            passband = (
+                (abs_f >= low_freq)
+                & (abs_f <= high_freq)
+            )
+
+            mask[passband] = 1.0
+
+            # 下边缘余弦过渡
+            lower_transition = (
+                (abs_f >= low_freq - transition)
+                & (abs_f < low_freq)
+            )
+
+            mask[lower_transition] = 0.5 * (
+                1.0
+                - np.cos(
+                    np.pi
+                    * (
+                        abs_f[lower_transition]
+                        - (low_freq - transition)
+                    )
+                    / transition
+                )
+            )
+
+            # 上边缘余弦过渡
+            upper_transition = (
+                (abs_f > high_freq)
+                & (abs_f <= high_freq + transition)
+            )
+
+            mask[upper_transition] = 0.5 * (
+                1.0
+                + np.cos(
+                    np.pi
+                    * (
+                        abs_f[upper_transition]
+                        - high_freq
+                    )
+                    / transition
+                )
+            )
+
+            message_spectrum = np.fft.fft(noise)
+
+            message = np.fft.ifft(
+                message_spectrum * mask
+            ).real
+
+            message -= np.mean(message)
+
+            message_std = np.std(message)
+
+            if message_std > 1e-12:
+                message /= message_std
+
+            # ----------------------------------------
+            # 2. Hilbert 变换，构造 SSB-SC USB
+            # ----------------------------------------
+
+            base = signal.hilbert(message)
+
+            # ----------------------------------------
+            # 3. 将实际占用频带中心移动至 0 Hz
+            # ----------------------------------------
+
+            band_center = (
+                low_freq
+                + message_bw / 2.0
+            )
+
+            t_local = np.arange(N) / self.fs
+
+            base = base * np.exp(
+                -1j
                 * 2
                 * np.pi
-                * mod_f
-                * np.arange(N)
-                / self.fs
+                * band_center
+                * t_local
             )
+
 
         else:
 
@@ -1089,14 +1195,38 @@ class SignalGenerator:
             + cp_len
         )
 
+        # --------------------------------------------------------
+        # WOLA 参数
+        # --------------------------------------------------------
+        overlap = nfft // 8
+
+        # 保证重叠长度不超过 CP
+        overlap = min(overlap, cp_len)
+
+        # 每个符号的起始位置仍间隔 nfft + cp_len
+        symbol_len = nfft + cp_len
+
         num_ofdm_symbols = (
-            N // symbol_len
-            + 1
+            N // symbol_len + 2
         )
 
-        blocks = []
+        # 为最后一个循环后缀预留空间
+        signal_out = np.zeros(
+            num_ofdm_symbols * symbol_len + overlap,
+            dtype=complex
+        )
 
-        # QPSK 星座
+        # 互补余弦平方窗
+        u = (
+            np.arange(overlap) + 0.5
+        ) / overlap
+
+        fade_in = np.sin(
+            np.pi * u / 2
+        ) ** 2
+
+        fade_out = 1.0 - fade_in
+
         const = np.array(
             [
                 1 + 0j,
@@ -1107,14 +1237,8 @@ class SignalGenerator:
             dtype=complex
         )
 
-        # --------------------------------------------------------
-        # 逐 OFDM symbol 生成
-        # --------------------------------------------------------
-        for _ in range(
-            num_ofdm_symbols
-        ):
+        for k in range(num_ofdm_symbols):
 
-            # fftshift 排列下的频域向量
             X_shifted = np.zeros(
                 nfft,
                 dtype=complex
@@ -1126,78 +1250,57 @@ class SignalGenerator:
                 num_active
             )
 
-            qpsk = const[
-                data_idx
-            ]
+            qpsk = const[data_idx]
 
-            # ----------------------------------------------------
-            # 把有效子载波放到 DC 附近
-            # ----------------------------------------------------
             start = (
                 nfft // 2
                 - num_active // 2
             )
 
-            end = (
-                start
-                + num_active
-            )
-
             X_shifted[
-                start:end
+                start:start + num_active
             ] = qpsk
 
-            # ----------------------------------------------------
-            # fftshift 格式转成 numpy IFFT 格式
-            # ----------------------------------------------------
             X_ifft = np.fft.ifftshift(
                 X_shifted
             )
 
-            x = np.fft.ifft(
-                X_ifft
-            )
+            x = np.fft.ifft(X_ifft)
 
-            # ----------------------------------------------------
-            # 每个 OFDM symbol 做 RMS 归一化
-            # ----------------------------------------------------
             rms = np.sqrt(
-                np.mean(
-                    np.abs(x) ** 2
-                )
+                np.mean(np.abs(x) ** 2)
             )
 
             if rms > 1e-12:
                 x = x / rms
 
-            # ----------------------------------------------------
-            # 添加循环前缀
-            # ----------------------------------------------------
-            cp = x[
-                -cp_len:
-            ]
+            # CP + 有效符号 + 循环后缀
+            cp = x[-cp_len:]
+            suffix = x[:overlap]
 
             block = np.concatenate(
-                [
-                    cp,
-                    x
-                ]
-            )
+                [cp, x, suffix]
+            ).astype(complex)
 
-            blocks.append(
-                block
-            )
+            # 只修改重叠边缘
+            block[:overlap] *= fade_in
+            block[-overlap:] *= fade_out
 
-        signal_out = np.concatenate(
-            blocks
-        )
+            # WOLA overlap-add
+            offset = k * symbol_len
 
+            signal_out[
+                offset:offset + len(block)
+            ] += block
+
+        # 截断至目标样本数
         signal_out = self._ensure_length(
             signal_out,
             N
         )
 
         return signal_out
+
 
     # ============================================================
     # 调制族
