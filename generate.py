@@ -1370,13 +1370,95 @@ class SignalGenerator:
             )
         )
 
+    def estimate_bbox_frequency(
+        self,
+        iq_signal,
+        signal_info,
+        energy_percent=0.95
+    ):
+        """
+        根据单信号 IQ 的 STFT 功率估计
+        Bounding Box 使用的有效频率范围。
+
+        只用于标签生成，不修改 IQ 信号。
+        """
+
+        spec_db, freqs, times = (
+            self.compute_spectrogram(iq_signal)
+        )
+
+        t_start = (
+            signal_info["t_start_sample"]
+            / self.fs
+        )
+
+        t_end = (
+            signal_info["t_end_sample"]
+            / self.fs
+        )
+
+        # 只统计信号活动时间
+        active = (
+            (times >= t_start)
+            & (times <= t_end)
+        )
+
+        if not np.any(active):
+            return (
+                signal_info["freq_low_hz"],
+                signal_info["freq_high_hz"]
+            )
+
+        # dB -> 线性功率
+        power = np.mean(
+            10.0 ** (spec_db[:, active] / 10.0),
+            axis=1
+        )
+
+        total_power = np.sum(power)
+
+        if (
+            not np.isfinite(total_power)
+            or total_power <= 0
+        ):
+            return (
+                signal_info["freq_low_hz"],
+                signal_info["freq_high_hz"]
+            )
+
+        cumulative = np.cumsum(power) / total_power
+
+        tail = (1.0 - energy_percent) / 2.0
+
+        low_idx = np.searchsorted(
+            cumulative, tail
+        )
+
+        high_idx = np.searchsorted(
+            cumulative, 1.0 - tail
+        )
+
+        # 额外保留一个频率 bin 的余量
+        low_idx = max(0, low_idx - 1)
+        high_idx = min(
+            len(freqs) - 1,
+            high_idx + 1
+        )
+
+        return (
+            float(freqs[low_idx]),
+            float(freqs[high_idx])
+        )
+
+
     # ============================================================
     # 多信号混合
     # ============================================================
 
     def generate_mixture(
         self,
-        num_signals=None
+        num_signals=None,
+        measure_bbox=False
     ):
 
         if num_signals is None:
@@ -1460,7 +1542,19 @@ class SignalGenerator:
                 t_start,
                 t_end
             )
+            # 仅在需要生成真实频带 Bounding Box 时执行
+            if measure_bbox:
 
+                bbox_f_low, bbox_f_high = (
+                    self.estimate_bbox_frequency(
+                        sig,
+                        info,
+                        energy_percent=0.95
+                    )
+                )
+
+                info["bbox_freq_low_hz"] = bbox_f_low
+                info["bbox_freq_high_hz"] = bbox_f_high
             mixture += sig
 
             info_list.append(
@@ -1603,50 +1697,41 @@ def save_spectrogram_image(
     dynamic_range_db=60
 ):
     """
-    保存原始dB时频谱。
+    保存无坐标轴、无边距的时频谱图。
 
-    不做背景中位数扣除，
-    不做硬阈值。
-
-    当前使用峰值以下固定动态范围进行显示。
+    图像范围严格对应完整 STFT 矩阵。
     """
 
-    vmax = float(
-        np.max(spec_db)
-    )
+    vmax = float(np.max(spec_db))
+    vmin = vmax - dynamic_range_db
 
-    vmin = (
-        vmax
-        - dynamic_range_db
-    )
-
-    plt.figure(
+    fig = plt.figure(
         figsize=(6, 4),
-        dpi=100
+        dpi=100,
+        frameon=False
     )
 
-    plt.imshow(
+    ax = fig.add_axes([0, 0, 1, 1])
+
+    ax.imshow(
         spec_db,
-        aspect='auto',
-        origin='lower',
-        cmap='viridis',
+        aspect="auto",
+        origin="lower",
+        cmap="viridis",
         vmin=vmin,
-        vmax=vmax
+        vmax=vmax,
+        interpolation="nearest"
     )
 
-    plt.axis('off')
+    ax.set_axis_off()
 
-    plt.tight_layout(
-        pad=0
-    )
-
-    plt.savefig(
+    fig.savefig(
         filename,
-        bbox_inches='tight',
+        dpi=100,
         pad_inches=0
     )
 
-    plt.close()
+    plt.close(fig)
 
 
 # ================================================================
@@ -1656,7 +1741,8 @@ def save_spectrogram_image(
 def generate_dataset(
     total_samples=12000,
     output_dir='signal_dataset_v5',
-    random_seed=None
+    random_seed=None,
+    measure_bbox=False
 ):
 
     if random_seed is not None:
@@ -1796,7 +1882,9 @@ def generate_dataset(
         ):
 
             mixture_clean, sig_info = (
-                gen.generate_mixture()
+                gen.generate_mixture(
+                    measure_bbox=measure_bbox
+                )
             )
 
             low_snr = int(
@@ -1828,7 +1916,7 @@ def generate_dataset(
 
             save_spectrogram_image(
                 spec_low_snr,
-                low_snr_filename
+                low_snr_filename,
             )
 
             spec_clean, _, _ = (

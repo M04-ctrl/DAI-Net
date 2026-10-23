@@ -21,6 +21,7 @@ result/
 # Signal detection experiments
 /bbox_preview/
 /bbox_preview_debug/
+/bbox_preview_debug_v2/
 /gmsk_diagnosis/
 /modulation_diagnosis/
 /spectrogram_comparison/
@@ -33,6 +34,7 @@ result/
 /generate_v55_backup.py
 /generate_before_indent_fix.py
 /generate_bbox_labels_backup.py
+/generate_bbox_labels_v01_backup.py
 
 # FM / AM diagnostics
 /fm_diagnosis/
@@ -46,4 +48,14 @@ result/
 /ofdm_cp_diagnosis/
 /ofdm_wola_diagnosis/
 /ofdm_wola_stability/
+
+/signal_dataset_bbox_debug_v2/
+/signal_dataset_bbox_display_test/
+/signal_dataset_bbox_measured/
+/signal_dataset_bbox_pilot100/
+/bbox_preview_measured/
+/bbox_yolo_export/
+/bbox_yolo_pilot100/
+/qa_pilot100/
+
 EOF
